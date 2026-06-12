@@ -2,26 +2,43 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  color: #101010;
+  background: #f6f5f1;
+  font-feature-settings: "ss01", "cv11";
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
+::selection {
+  background: #d7f542;
+  color: #101010;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium tracking-tight transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-ink text-white hover:bg-ink/85 active:scale-[0.98];
+  }
+  .btn-secondary {
+    @apply btn bg-transparent text-ink border border-ink/20 hover:border-ink hover:bg-white active:scale-[0.98];
+  }
+  .btn-danger {
+    @apply btn bg-transparent text-red-600 border border-red-200 hover:border-red-500 hover:bg-red-50;
+  }
+  .input {
+    @apply w-full rounded-xl border border-ink/15 bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-ink/35 focus:outline-none focus:border-ink focus:ring-2 focus:ring-lime transition-colors;
+  }
+  .label {
+    @apply block text-sm font-medium text-ink mb-1.5;
+  }
+  .card {
+    @apply bg-white rounded-2xl border border-ink/10 shadow-[0_1px_2px_rgba(16,16,16,0.04),0_4px_16px_-8px_rgba(16,16,16,0.06)];
+  }
+  .eyebrow {
+    @apply font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-ink/45;
+  }
+  .h-display {
+    @apply font-semibold tracking-tight text-ink;
   }
 }
