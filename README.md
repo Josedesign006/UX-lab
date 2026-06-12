@@ -55,17 +55,18 @@ auth endpoints, and encrypted backups.
 ## Deploying
 
 The app needs a Node server with a persistent disk (studies live in
-`data/db.json`). A `Dockerfile` is included:
+`data/db.json`). A `Dockerfile` and a `docker-compose.yml` (app + Caddy for
+automatic HTTPS) are included:
 
 ```bash
-docker build -t uxlab .
-docker run -d -p 3000:3000 -v uxlab-data:/app/data --restart unless-stopped uxlab
+echo 'UXLAB_DOMAIN=yourname.duckdns.org' > .env
+docker compose up -d --build
 ```
 
 Free options that work as-is (persistent disk included):
 
-- **Oracle Cloud Always Free** — a free-forever ARM VM (up to 4 cores / 24GB);
-  run the Docker image, front it with Caddy for automatic HTTPS.
+- **Oracle Cloud Always Free** — a free-forever ARM VM (up to 4 cores / 24GB).
+  Full step-by-step walkthrough in [DEPLOY.md](DEPLOY.md).
 - **Your own hardware** — any spare machine + a free
   [DuckDNS](https://www.duckdns.org) subdomain + Let's Encrypt.
 

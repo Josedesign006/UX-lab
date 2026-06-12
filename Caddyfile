@@ -1,0 +1,3 @@
+{$UXLAB_DOMAIN} {
+	reverse_proxy uxlab:3000
+}

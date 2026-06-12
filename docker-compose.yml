@@ -1,0 +1,25 @@
+services:
+  uxlab:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - uxlab-data:/app/data
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # your public hostname, e.g. mylab.duckdns.org
+      UXLAB_DOMAIN: ${UXLAB_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  uxlab-data:
+  caddy-data:
+  caddy-config:
