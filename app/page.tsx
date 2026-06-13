@@ -14,11 +14,11 @@ const STATUS_STYLES: Record<string, string> = {
   closed: "bg-amber-100 text-amber-800",
 };
 
-export default function Dashboard() {
-  const user = currentUser();
+export default async function Dashboard() {
+  const user = await currentUser();
   if (!user) redirect("/login");
-  const studies = listStudies(user.id);
-  const counts = countResponses();
+  const studies = await listStudies(user.id);
+  const counts = await countResponses();
   const totalResponses = studies.reduce((a, s) => a + (counts[s.id] ?? 0), 0);
   const live = studies.filter((s) => s.status === "live").length;
 

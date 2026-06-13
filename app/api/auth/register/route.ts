@@ -21,19 +21,19 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  if (getUserByEmail(email)) {
+  if (await getUserByEmail(email)) {
     return NextResponse.json(
       { error: "An account with this email already exists." },
       { status: 409 }
     );
   }
-  const user = createUser({
+  const user = await createUser({
     id: newUserId(),
     email: email.trim().toLowerCase(),
     passwordHash: hashPassword(password),
     createdAt: new Date().toISOString(),
   });
-  const session = createSession(user.id);
+  const session = await createSession(user.id);
   const res = NextResponse.json({ ok: true, email: user.email });
   res.cookies.set(SESSION_COOKIE, session.token, sessionCookieOptions());
   return res;

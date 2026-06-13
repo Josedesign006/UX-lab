@@ -179,12 +179,12 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const study = getStudy(params.id);
+  const study = await getStudy(params.id);
   if (!study) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (!canAccessStudy(currentUser(), study)) {
+  if (!canAccessStudy(await currentUser(), study)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const responses = listResponses(params.id);
+  const responses = await listResponses(params.id);
   const csv = toCsv(buildRows(study, responses));
   return new NextResponse(csv, {
     headers: {

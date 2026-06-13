@@ -8,10 +8,10 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: { id: string; rid: string } }
 ) {
-  const study = getStudy(params.id);
-  if (!study || !canAccessStudy(currentUser(), study)) {
+  const study = await getStudy(params.id);
+  if (!study || !canAccessStudy(await currentUser(), study)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  deleteResponse(params.id, params.rid);
+  await deleteResponse(params.id, params.rid);
   return NextResponse.json({ ok: true });
 }

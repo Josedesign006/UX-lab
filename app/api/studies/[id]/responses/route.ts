@@ -9,18 +9,18 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const study = getStudy(params.id);
-  if (!study || !canAccessStudy(currentUser(), study)) {
+  const study = await getStudy(params.id);
+  if (!study || !canAccessStudy(await currentUser(), study)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  return NextResponse.json(listResponses(params.id));
+  return NextResponse.json(await listResponses(params.id));
 }
 
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const study = getStudy(params.id);
+  const study = await getStudy(params.id);
   if (!study) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (study.status !== "live")
     return NextResponse.json({ error: "Study is not accepting responses" }, { status: 403 });
@@ -37,6 +37,6 @@ export async function POST(
     postAnswers: body.postAnswers ?? [],
     data: body.data,
   };
-  addResponse(resp);
+  await addResponse(resp);
   return NextResponse.json({ ok: true }, { status: 201 });
 }

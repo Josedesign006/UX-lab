@@ -8,9 +8,9 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const study = getStudy(params.id);
+  const study = await getStudy(params.id);
   if (!study) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const user = currentUser();
+  const user = await currentUser();
   // owners get full access; anonymous participants may read LIVE studies only
   if (!canAccessStudy(user, study) && study.status !== "live") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -22,16 +22,16 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const study = getStudy(params.id);
+  const study = await getStudy(params.id);
   if (!study) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (!canAccessStudy(currentUser(), study)) {
+  if (!canAccessStudy(await currentUser(), study)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const patch = await req.json();
   delete patch.id;
   delete patch.createdAt;
   delete patch.ownerId; // ownership can't be changed via API
-  const updated = updateStudy(params.id, patch);
+  const updated = await updateStudy(params.id, patch);
   return NextResponse.json(updated);
 }
 
@@ -39,11 +39,11 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const study = getStudy(params.id);
+  const study = await getStudy(params.id);
   if (!study) return NextResponse.json({ ok: true });
-  if (!canAccessStudy(currentUser(), study)) {
+  if (!canAccessStudy(await currentUser(), study)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  deleteStudy(params.id);
+  await deleteStudy(params.id);
   return NextResponse.json({ ok: true });
 }

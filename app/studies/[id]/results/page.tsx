@@ -26,12 +26,12 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default function ResultsPage({ params }: { params: { id: string } }) {
-  const user = currentUser();
+export default async function ResultsPage({ params }: { params: { id: string } }) {
+  const user = await currentUser();
   if (!user) redirect("/login");
-  const study = getStudy(params.id);
+  const study = await getStudy(params.id);
   if (!study || !canAccessStudy(user, study)) notFound();
-  const responses = listResponses(params.id);
+  const responses = await listResponses(params.id);
   const meta = STUDY_TYPE_META[study.type];
 
   return (

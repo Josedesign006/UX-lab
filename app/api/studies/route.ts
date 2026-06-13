@@ -7,10 +7,10 @@ import { StudyType } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const user = currentUser();
+  const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const counts = countResponses();
-  const studies = listStudies(user.id).map((s) => ({
+  const counts = await countResponses();
+  const studies = (await listStudies(user.id)).map((s) => ({
     ...s,
     responseCount: counts[s.id] ?? 0,
   }));
@@ -18,13 +18,13 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const user = currentUser();
+  const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = await req.json();
   const type = body.type as StudyType;
   const name = (body.name as string) || "Untitled study";
   const study = newStudy(type, name);
   study.ownerId = user.id;
-  createStudy(study);
+  await createStudy(study);
   return NextResponse.json(study, { status: 201 });
 }

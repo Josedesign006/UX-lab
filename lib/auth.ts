@@ -32,13 +32,13 @@ export function verifyPassword(password: string, stored: string): boolean {
 
 // ---------- sessions ----------
 
-export function createSession(userId: string): Session {
+export async function createSession(userId: string): Promise<Session> {
   const session: Session = {
     token: crypto.randomBytes(32).toString("hex"),
     userId,
     expiresAt: new Date(Date.now() + SESSION_DAYS * 86400e3).toISOString(),
   };
-  createSessionRecord(session);
+  await createSessionRecord(session);
   return session;
 }
 
@@ -53,17 +53,17 @@ export function sessionCookieOptions() {
 }
 
 /** Current logged-in user, resolved from the session cookie. */
-export function currentUser(): User | null {
+export async function currentUser(): Promise<User | null> {
   const token = cookies().get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  const session = getSession(token);
+  const session = await getSession(token);
   if (!session) return null;
-  return getUserById(session.userId) ?? null;
+  return (await getUserById(session.userId)) ?? null;
 }
 
-export function logout() {
+export async function logout() {
   const token = cookies().get(SESSION_COOKIE)?.value;
-  if (token) deleteSession(token);
+  if (token) await deleteSession(token);
 }
 
 /** Does this user own (or have legacy access to) the study? */
