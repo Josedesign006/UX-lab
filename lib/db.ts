@@ -6,12 +6,20 @@ import { Study, StudyResponse } from "./types";
 export interface User {
   id: string;
   email: string;
-  /** scrypt: salthex:hashhex — never stored in plaintext */
+  /** scrypt: salthex:hashhex. Empty for Google-only accounts (no password). */
   passwordHash: string;
+  /** Google "sub" id, set when the account signs in with Google. */
+  googleId?: string;
   createdAt: string;
 }
 
 export interface Session {
+  token: string;
+  userId: string;
+  expiresAt: string;
+}
+
+export interface PasswordReset {
   token: string;
   userId: string;
   expiresAt: string;
@@ -34,10 +42,16 @@ export function uid(prefix = ""): string {
 interface Store {
   getUserByEmail(email: string): Promise<User | undefined>;
   getUserById(id: string): Promise<User | undefined>;
+  getUserByGoogleId(googleId: string): Promise<User | undefined>;
   createUser(user: User): Promise<User>;
+  setUserGoogleId(userId: string, googleId: string): Promise<void>;
+  setUserPassword(userId: string, passwordHash: string): Promise<void>;
   createSessionRecord(session: Session): Promise<void>;
   getSession(token: string): Promise<Session | undefined>;
   deleteSession(token: string): Promise<void>;
+  createPasswordReset(reset: PasswordReset): Promise<void>;
+  getPasswordReset(token: string): Promise<PasswordReset | undefined>;
+  deletePasswordReset(token: string): Promise<void>;
   listStudies(ownerId?: string): Promise<Study[]>;
   getStudy(id: string): Promise<Study | undefined>;
   createStudy(study: Study): Promise<Study>;
@@ -59,6 +73,7 @@ interface FileDB {
   sessions: Session[];
   studies: Study[];
   responses: StudyResponse[];
+  passwordResets: PasswordReset[];
 }
 
 function load(): FileDB {
@@ -70,9 +85,16 @@ function load(): FileDB {
       sessions: db.sessions ?? [],
       studies: db.studies ?? [],
       responses: db.responses ?? [],
+      passwordResets: db.passwordResets ?? [],
     };
   } catch {
-    return { users: [], sessions: [], studies: [], responses: [] };
+    return {
+      users: [],
+      sessions: [],
+      studies: [],
+      responses: [],
+      passwordResets: [],
+    };
   }
 }
 
@@ -92,11 +114,26 @@ const fileStore: Store = {
   async getUserById(id) {
     return load().users.find((u) => u.id === id);
   },
+  async getUserByGoogleId(googleId) {
+    return load().users.find((u) => u.googleId === googleId);
+  },
   async createUser(user) {
     const db = load();
     db.users.push(user);
     save(db);
     return user;
+  },
+  async setUserGoogleId(userId, googleId) {
+    const db = load();
+    const u = db.users.find((x) => x.id === userId);
+    if (u) u.googleId = googleId;
+    save(db);
+  },
+  async setUserPassword(userId, passwordHash) {
+    const db = load();
+    const u = db.users.find((x) => x.id === userId);
+    if (u) u.passwordHash = passwordHash;
+    save(db);
   },
   async createSessionRecord(session) {
     const db = load();
@@ -113,6 +150,23 @@ const fileStore: Store = {
   async deleteSession(token) {
     const db = load();
     db.sessions = db.sessions.filter((s) => s.token !== token);
+    save(db);
+  },
+  async createPasswordReset(reset) {
+    const db = load();
+    const now = new Date().toISOString();
+    db.passwordResets = db.passwordResets.filter((r) => r.expiresAt > now);
+    db.passwordResets.push(reset);
+    save(db);
+  },
+  async getPasswordReset(token) {
+    const r = load().passwordResets.find((x) => x.token === token);
+    if (!r || r.expiresAt <= new Date().toISOString()) return undefined;
+    return r;
+  },
+  async deletePasswordReset(token) {
+    const db = load();
+    db.passwordResets = db.passwordResets.filter((r) => r.token !== token);
     save(db);
   },
   async listStudies(ownerId) {
@@ -188,7 +242,14 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT;
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
 CREATE TABLE IF NOT EXISTS sessions (
+  token TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS password_resets (
   token TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   expires_at TEXT NOT NULL
@@ -237,7 +298,8 @@ function rowToUser(r: Record<string, unknown>): User {
   return {
     id: r.id as string,
     email: r.email as string,
-    passwordHash: r.password_hash as string,
+    passwordHash: (r.password_hash as string) ?? "",
+    googleId: (r.google_id as string | null) ?? undefined,
     createdAt: r.created_at as string,
   };
 }
@@ -254,12 +316,27 @@ const pgStore: Store = {
     const { rows } = await q("SELECT * FROM users WHERE id = $1", [id]);
     return rows[0] ? rowToUser(rows[0]) : undefined;
   },
+  async getUserByGoogleId(googleId) {
+    const { rows } = await q("SELECT * FROM users WHERE google_id = $1", [
+      googleId,
+    ]);
+    return rows[0] ? rowToUser(rows[0]) : undefined;
+  },
   async createUser(user) {
     await q(
-      "INSERT INTO users (id, email, password_hash, created_at) VALUES ($1,$2,$3,$4)",
-      [user.id, user.email, user.passwordHash, user.createdAt]
+      "INSERT INTO users (id, email, password_hash, google_id, created_at) VALUES ($1,$2,$3,$4,$5)",
+      [user.id, user.email, user.passwordHash, user.googleId ?? null, user.createdAt]
     );
     return user;
+  },
+  async setUserGoogleId(userId, googleId) {
+    await q("UPDATE users SET google_id = $2 WHERE id = $1", [userId, googleId]);
+  },
+  async setUserPassword(userId, passwordHash) {
+    await q("UPDATE users SET password_hash = $2 WHERE id = $1", [
+      userId,
+      passwordHash,
+    ]);
   },
   async createSessionRecord(session) {
     await q("DELETE FROM sessions WHERE expires_at <= $1", [
@@ -283,6 +360,32 @@ const pgStore: Store = {
   },
   async deleteSession(token) {
     await q("DELETE FROM sessions WHERE token = $1", [token]);
+  },
+  async createPasswordReset(reset) {
+    await q("DELETE FROM password_resets WHERE expires_at <= $1", [
+      new Date().toISOString(),
+    ]);
+    await q(
+      "INSERT INTO password_resets (token, user_id, expires_at) VALUES ($1,$2,$3)",
+      [reset.token, reset.userId, reset.expiresAt]
+    );
+  },
+  async getPasswordReset(token) {
+    const { rows } = await q(
+      "SELECT * FROM password_resets WHERE token = $1",
+      [token]
+    );
+    const r = rows[0];
+    if (!r || (r.expires_at as string) <= new Date().toISOString())
+      return undefined;
+    return {
+      token: r.token as string,
+      userId: r.user_id as string,
+      expiresAt: r.expires_at as string,
+    };
+  },
+  async deletePasswordReset(token) {
+    await q("DELETE FROM password_resets WHERE token = $1", [token]);
   },
   async listStudies(ownerId) {
     const { rows } = await q(
@@ -364,10 +467,21 @@ const store: Store = PG_URL ? pgStore : fileStore;
 
 export const getUserByEmail = (email: string) => store.getUserByEmail(email);
 export const getUserById = (id: string) => store.getUserById(id);
+export const getUserByGoogleId = (googleId: string) =>
+  store.getUserByGoogleId(googleId);
 export const createUser = (user: User) => store.createUser(user);
+export const setUserGoogleId = (userId: string, googleId: string) =>
+  store.setUserGoogleId(userId, googleId);
+export const setUserPassword = (userId: string, passwordHash: string) =>
+  store.setUserPassword(userId, passwordHash);
 export const createSessionRecord = (s: Session) => store.createSessionRecord(s);
 export const getSession = (token: string) => store.getSession(token);
 export const deleteSession = (token: string) => store.deleteSession(token);
+export const createPasswordReset = (r: PasswordReset) =>
+  store.createPasswordReset(r);
+export const getPasswordReset = (token: string) => store.getPasswordReset(token);
+export const deletePasswordReset = (token: string) =>
+  store.deletePasswordReset(token);
 export const listStudies = (ownerId?: string) => store.listStudies(ownerId);
 export const getStudy = (id: string) => store.getStudy(id);
 export const createStudy = (study: Study) => store.createStudy(study);
