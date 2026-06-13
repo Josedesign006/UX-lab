@@ -213,10 +213,13 @@ let schemaReady: Promise<unknown> | null = null;
 
 function getPool(): Pool {
   if (!pool) {
-    const local = /localhost|127\.0\.0\.1/.test(PG_URL!);
+    const url = new URL(PG_URL!);
+    const local = ["localhost", "127.0.0.1"].includes(url.hostname);
+    // pg >= 8.16 escalates sslmode=require in the URL to verify-full, which
+    // rejects hosted poolers' certs (Supabase/Neon) — drive TLS from config
+    url.searchParams.delete("sslmode");
     pool = new Pool({
-      connectionString: PG_URL,
-      // hosted Postgres (Neon, Supabase, RDS…) requires TLS; local doesn't
+      connectionString: url.toString(),
       ssl: local ? undefined : { rejectUnauthorized: false },
       max: 3,
     });
