@@ -52,6 +52,30 @@ For production you'd additionally want HTTPS (terminate TLS in front),
 a real database (Postgres/SQLite) instead of `data/db.json`, rate limiting on
 auth endpoints, and encrypted backups.
 
+## Optional integrations
+
+Everything below is **off unless you set the env vars** — the app works fully
+with just email/password and the local JSON store, so self-hosting needs no
+external services.
+
+| Env vars | Enables |
+| --- | --- |
+| `DATABASE_URL` or `POSTGRES_URL` | Postgres backend (required on serverless hosts like Vercel; without it the app uses `data/db.json`) |
+| `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` | "Continue with Google" sign-in |
+| `RESEND_API_KEY` (+ optional `RESEND_FROM`) | "Forgot password" reset emails (via [Resend](https://resend.com)) |
+| `APP_URL` | Override the public base URL used in OAuth redirects / reset links (auto-detected from the request otherwise) |
+
+**Google sign-in:** create an OAuth 2.0 Client (type *Web application*) in the
+[Google Cloud Console](https://console.cloud.google.com/apis/credentials), add
+`https://YOUR_DOMAIN/api/auth/google/callback` (and
+`http://localhost:3000/api/auth/google/callback` for dev) as authorized
+redirect URIs, then set the client id/secret. The login page shows the Google
+button automatically once both are present.
+
+**Password reset:** add a `RESEND_API_KEY`. Without a verified sending domain,
+Resend only delivers to your own account email; set `RESEND_FROM` to a
+verified-domain address (e.g. `UXLab <noreply@yourdomain.com>`) to email anyone.
+
 ## Deploying
 
 The app needs a Node server with a persistent disk (studies live in
