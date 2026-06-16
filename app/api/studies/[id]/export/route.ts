@@ -5,6 +5,9 @@ import { nodePathLabel } from "@/lib/analysis";
 import {
   CardSortConfig,
   CardSortResult,
+  CognitiveWalkthroughConfig,
+  CognitiveWalkthroughResult,
+  CWDimension,
   FirstClickConfig,
   FirstClickResult,
   PrototypeConfig,
@@ -168,6 +171,55 @@ function buildRows(study: Study, responses: StudyResponse[]): unknown[][] {
             t.timeMs,
             ...post(r),
           ]);
+        }
+      }
+      return rows;
+    }
+    case "cognitive-walkthrough": {
+      const cfg = study.config as CognitiveWalkthroughConfig;
+      const taskText = new Map(cfg.tasks.map((t) => [t.id, t.text]));
+      const stepAction = new Map(
+        cfg.tasks.flatMap((t) => t.steps.map((s) => [s.id, s.action]))
+      );
+      const dimOf = new Map<string, CWDimension>(
+        cfg.questions.map((q) => [q.id, q.dimension])
+      );
+      // one column per question, plus severity / failure story
+      const qHeaders = cfg.questions.map(
+        (q) => `${dimOf.get(q.id)}: ${q.text}`
+      );
+      const rows: unknown[][] = [
+        [
+          ...baseHeader,
+          ...preH,
+          "task",
+          "step",
+          ...qHeaders,
+          "severity_0to4",
+          "failure_story",
+          "time_ms",
+          ...postH,
+        ],
+      ];
+      for (const r of responses) {
+        const d = r.data as CognitiveWalkthroughResult;
+        for (const t of d.tasks) {
+          for (const s of t.steps) {
+            const verdicts = cfg.questions.map(
+              (q) =>
+                s.answers.find((a) => a.questionId === q.id)?.verdict ?? ""
+            );
+            rows.push([
+              ...base(r),
+              taskText.get(t.taskId) ?? t.taskId,
+              stepAction.get(s.stepId) ?? s.stepId,
+              ...verdicts,
+              s.severity ?? "",
+              s.failureStory,
+              s.timeMs,
+              ...post(r),
+            ]);
+          }
         }
       }
       return rows;

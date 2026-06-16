@@ -1,7 +1,31 @@
 import fs from "fs";
 import path from "path";
 import { Pool } from "pg";
-import { Study, StudyResponse } from "./types";
+import { Study, StudyResponse, StudyStatus, StudyType } from "./types";
+
+/**
+ * Lightweight study row for list views (dashboard). Deliberately omits the
+ * heavy `config` (which can hold megabytes of inline data-URL screenshots),
+ * so listing studies stays fast no matter how large each study gets.
+ */
+export interface StudySummary {
+  id: string;
+  type: StudyType;
+  name: string;
+  status: StudyStatus;
+  updatedAt: string;
+}
+
+/** Aggregated response metrics for one study, used by the dashboard. */
+export interface ResponseStat {
+  count: number;
+  /** responses completed in the last 7 days */
+  week: number;
+  /** ISO timestamp of the most recent response, or null */
+  lastAt: string | null;
+  /** mean response duration in ms, or null when unknown */
+  avgMs: number | null;
+}
 
 export interface User {
   id: string;
@@ -53,12 +77,14 @@ interface Store {
   getPasswordReset(token: string): Promise<PasswordReset | undefined>;
   deletePasswordReset(token: string): Promise<void>;
   listStudies(ownerId?: string): Promise<Study[]>;
+  listStudySummaries(ownerId?: string): Promise<StudySummary[]>;
   getStudy(id: string): Promise<Study | undefined>;
   createStudy(study: Study): Promise<Study>;
   updateStudy(id: string, patch: Partial<Study>): Promise<Study | undefined>;
   deleteStudy(id: string): Promise<void>;
   listResponses(studyId: string): Promise<StudyResponse[]>;
   countResponses(): Promise<Record<string, number>>;
+  responseStats(): Promise<Record<string, ResponseStat>>;
   addResponse(resp: StudyResponse): Promise<StudyResponse>;
   deleteResponse(studyId: string, responseId: string): Promise<void>;
 }
@@ -76,11 +102,18 @@ interface FileDB {
   passwordResets: PasswordReset[];
 }
 
+// The db.json file can grow to several MB (prototype/first-click studies embed
+// data-URL images). Re-reading + JSON.parsing it on every operation made each
+// request do many MB of work. Since this server is the only writer, keep the
+// parsed DB in memory and write through on save().
+let cache: FileDB | null = null;
+
 function load(): FileDB {
+  if (cache) return cache;
   try {
     const raw = fs.readFileSync(DB_FILE, "utf-8");
     const db = JSON.parse(raw);
-    return {
+    cache = {
       users: db.users ?? [],
       sessions: db.sessions ?? [],
       studies: db.studies ?? [],
@@ -88,7 +121,7 @@ function load(): FileDB {
       passwordResets: db.passwordResets ?? [],
     };
   } catch {
-    return {
+    cache = {
       users: [],
       sessions: [],
       studies: [],
@@ -96,9 +129,11 @@ function load(): FileDB {
       passwordResets: [],
     };
   }
+  return cache;
 }
 
 function save(db: FileDB) {
+  cache = db;
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const tmp = DB_FILE + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(db));
@@ -174,6 +209,18 @@ const fileStore: Store = {
       .studies.filter((s) => !ownerId || !s.ownerId || s.ownerId === ownerId)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   },
+  async listStudySummaries(ownerId) {
+    return load()
+      .studies.filter((s) => !ownerId || !s.ownerId || s.ownerId === ownerId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map((s) => ({
+        id: s.id,
+        type: s.type,
+        name: s.name,
+        status: s.status,
+        updatedAt: s.updatedAt,
+      }));
+  },
   async getStudy(id) {
     return load().studies.find((s) => s.id === id);
   },
@@ -213,6 +260,30 @@ const fileStore: Store = {
       counts[r.studyId] = (counts[r.studyId] ?? 0) + 1;
     }
     return counts;
+  },
+  async responseStats() {
+    const since = new Date(Date.now() - 7 * 86400e3).toISOString();
+    const acc: Record<string, { count: number; week: number; lastAt: string | null; sum: number; durN: number }> = {};
+    for (const r of load().responses) {
+      const s = (acc[r.studyId] ??= { count: 0, week: 0, lastAt: null, sum: 0, durN: 0 });
+      s.count++;
+      if (r.completedAt >= since) s.week++;
+      if (!s.lastAt || r.completedAt > s.lastAt) s.lastAt = r.completedAt;
+      if (typeof r.durationMs === "number") {
+        s.sum += r.durationMs;
+        s.durN++;
+      }
+    }
+    const out: Record<string, ResponseStat> = {};
+    for (const [id, s] of Object.entries(acc)) {
+      out[id] = {
+        count: s.count,
+        week: s.week,
+        lastAt: s.lastAt,
+        avgMs: s.durN ? s.sum / s.durN : null,
+      };
+    }
+    return out;
   },
   async addResponse(resp) {
     const db = load();
@@ -396,6 +467,28 @@ const pgStore: Store = {
     );
     return rows.map((r) => r.data as Study);
   },
+  async listStudySummaries(ownerId) {
+    // Project just the fields the list view needs straight out of JSONB so we
+    // never ship the (potentially multi-MB) screenshot payloads over the wire.
+    const { rows } = await q(
+      `SELECT id,
+              updated_at,
+              data->>'name'   AS name,
+              data->>'type'   AS type,
+              data->>'status' AS status
+       FROM studies
+       WHERE $1::text IS NULL OR owner_id IS NULL OR owner_id = $1
+       ORDER BY updated_at DESC`,
+      [ownerId ?? null]
+    );
+    return rows.map((r) => ({
+      id: r.id as string,
+      type: r.type as StudyType,
+      name: r.name as string,
+      status: r.status as StudyStatus,
+      updatedAt: r.updated_at as string,
+    }));
+  },
   async getStudy(id) {
     const { rows } = await q("SELECT data FROM studies WHERE id = $1", [id]);
     return rows[0] ? (rows[0].data as Study) : undefined;
@@ -441,6 +534,29 @@ const pgStore: Store = {
     for (const r of rows) counts[r.study_id as string] = r.n as number;
     return counts;
   },
+  async responseStats() {
+    const since = new Date(Date.now() - 7 * 86400e3).toISOString();
+    const { rows } = await q(
+      `SELECT study_id,
+              COUNT(*)::int AS n,
+              COUNT(*) FILTER (WHERE completed_at >= $1)::int AS week_n,
+              MAX(completed_at) AS last_at,
+              AVG(NULLIF(data->>'durationMs', '')::numeric) AS avg_ms
+       FROM responses
+       GROUP BY study_id`,
+      [since]
+    );
+    const out: Record<string, ResponseStat> = {};
+    for (const r of rows) {
+      out[r.study_id as string] = {
+        count: r.n as number,
+        week: r.week_n as number,
+        lastAt: (r.last_at as string | null) ?? null,
+        avgMs: r.avg_ms != null ? Number(r.avg_ms) : null,
+      };
+    }
+    return out;
+  },
   async addResponse(resp) {
     const { rows } = await q(
       "SELECT COUNT(*)::int AS n FROM responses WHERE study_id = $1",
@@ -483,6 +599,8 @@ export const getPasswordReset = (token: string) => store.getPasswordReset(token)
 export const deletePasswordReset = (token: string) =>
   store.deletePasswordReset(token);
 export const listStudies = (ownerId?: string) => store.listStudies(ownerId);
+export const listStudySummaries = (ownerId?: string) =>
+  store.listStudySummaries(ownerId);
 export const getStudy = (id: string) => store.getStudy(id);
 export const createStudy = (study: Study) => store.createStudy(study);
 export const updateStudy = (id: string, patch: Partial<Study>) =>
@@ -490,6 +608,7 @@ export const updateStudy = (id: string, patch: Partial<Study>) =>
 export const deleteStudy = (id: string) => store.deleteStudy(id);
 export const listResponses = (studyId: string) => store.listResponses(studyId);
 export const countResponses = () => store.countResponses();
+export const responseStats = () => store.responseStats();
 export const addResponse = (resp: StudyResponse) => store.addResponse(resp);
 export const deleteResponse = (studyId: string, responseId: string) =>
   store.deleteResponse(studyId, responseId);

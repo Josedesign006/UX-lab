@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
-import { countResponses, createStudy, listStudies } from "@/lib/db";
+import { countResponses, createStudy, listStudySummaries } from "@/lib/db";
 import { newStudy } from "@/lib/defaults";
 import { StudyType } from "@/lib/types";
 
@@ -9,8 +9,11 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const counts = await countResponses();
-  const studies = (await listStudies(user.id)).map((s) => ({
+  const [summaries, counts] = await Promise.all([
+    listStudySummaries(user.id),
+    countResponses(),
+  ]);
+  const studies = summaries.map((s) => ({
     ...s,
     responseCount: counts[s.id] ?? 0,
   }));

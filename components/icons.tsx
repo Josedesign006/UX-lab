@@ -77,6 +77,14 @@ export const IconFlask = (p: IconProps) => (
   </Base>
 );
 
+export const IconCompass = (p: IconProps) => (
+  <Base {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M15.5 8.5l-2 5-5 2 2-5 5-2Z" />
+    <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+  </Base>
+);
+
 export function StudyTypeIcon({
   type,
   className,
@@ -89,6 +97,7 @@ export function StudyTypeIcon({
     survey: IconClipboard,
     prototype: IconPhone,
     usability: IconFlask,
+    "cognitive-walkthrough": IconCompass,
   };
   const C = map[type];
   return <C className={className} strokeWidth={strokeWidth} />;
@@ -202,6 +211,13 @@ export const IconClock = (p: IconProps) => (
   <Base {...p}>
     <circle cx="12" cy="12" r="9" />
     <path d="M12 7v5l3.5 2" />
+  </Base>
+);
+
+export const IconSearch = (p: IconProps) => (
+  <Base {...p}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="M16 16l4.5 4.5" />
   </Base>
 );
 

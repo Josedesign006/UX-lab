@@ -10,6 +10,7 @@ import TreeTestActivity from "@/components/participant/TreeTestActivity";
 import FirstClickActivity from "@/components/participant/FirstClickActivity";
 import PrototypeActivity from "@/components/participant/PrototypeActivity";
 import UsabilityActivity from "@/components/participant/UsabilityActivity";
+import CognitiveWalkthroughActivity from "@/components/participant/CognitiveWalkthroughActivity";
 import { Answer, ResultData, Study, SurveyConfig } from "@/lib/types";
 
 type Stage = "loading" | "unavailable" | "welcome" | "pre" | "activity" | "post" | "submitting" | "done";
@@ -172,6 +173,8 @@ function Activity({ study, onDone }: { study: Study; onDone: (d: ResultData) => 
       return <PrototypeActivity config={cfg} instructions={study.instructions} onDone={onDone} />;
     case "usability":
       return <UsabilityActivity config={cfg} instructions={study.instructions} onDone={onDone} />;
+    case "cognitive-walkthrough":
+      return <CognitiveWalkthroughActivity config={cfg} instructions={study.instructions} onDone={onDone} />;
   }
 }
 

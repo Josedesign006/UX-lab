@@ -8,9 +8,9 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const study = await getStudy(params.id);
+  // Independent lookups — run them together to save a round-trip.
+  const [study, user] = await Promise.all([getStudy(params.id), currentUser()]);
   if (!study) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const user = await currentUser();
   // owners get full access; anonymous participants may read LIVE studies only
   if (!canAccessStudy(user, study) && study.status !== "live") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });

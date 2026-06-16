@@ -1,6 +1,13 @@
 import {
   CardSortConfig,
   CardSortResult,
+  CognitiveWalkthroughConfig,
+  CognitiveWalkthroughResult,
+  CWDimension,
+  CWQuestionDef,
+  CWStep,
+  CWTask,
+  CWVerdict,
   StudyResponse,
   TreeNode,
   TreeTestConfig,
@@ -434,6 +441,256 @@ export function pathVisitCounts(taskResults: TreeTaskResult[]): Map<string, numb
     seen.forEach((id) => m.set(id, (m.get(id) ?? 0) + 1));
   }
   return m;
+}
+
+// ============ Cognitive walkthrough analysis ============
+
+/**
+ * Research-grounded reference for the four cognitive-walkthrough dimensions
+ * (Wharton et al., 1994). `redesign` names the design lever that typically
+ * fixes a failure on that dimension — this is what turns a "no" into advice.
+ */
+export const CW_DIMENSION_META: Record<
+  CWDimension,
+  { label: string; short: string; blurb: string; redesign: string; color: string }
+> = {
+  goal: {
+    label: "Goal formation",
+    short: "Right goal",
+    blurb:
+      "Will the user even try the correct action? Failures mean the interface doesn't prompt the right sub-goal — users don't know this step is what they should do next.",
+    redesign:
+      "Set expectations & guidance — onboarding, clearer information scent, prompts, or removing steps the user wouldn't think to take.",
+    color: "#6366f1",
+  },
+  visibility: {
+    label: "Control visibility",
+    short: "Noticed",
+    blurb:
+      "Will the user notice the correct control exists? Failures mean the action is hidden, buried, or visually lost (low discoverability).",
+    redesign:
+      "Increase salience — surface the control, improve contrast/placement, reduce clutter, or avoid hover-only / off-screen affordances.",
+    color: "#0ea5e9",
+  },
+  match: {
+    label: "Action–goal match",
+    short: "Recognised",
+    blurb:
+      "Once seen, will the user recognise this control as the right one? Failures mean labels, icons, or wording don't match the user's mental model.",
+    redesign:
+      "Fix labels & affordances — use the user's words, clearer icons, descriptive link text, and avoid jargon or ambiguous calls-to-action.",
+    color: "#f59e0b",
+  },
+  feedback: {
+    label: "Feedback",
+    short: "Progress shown",
+    blurb:
+      "After acting, will the user see they made progress? Failures mean missing, delayed, or unclear system feedback after the action.",
+    redesign:
+      "Confirm progress — visible state changes, success messages, loading indicators, and clear next-step cues after each action.",
+    color: "#10b981",
+  },
+};
+
+export interface CWVerdictCounts {
+  yes: number;
+  no: number;
+  unsure: number;
+}
+
+export function cwTally(verdicts: CWVerdict[]): CWVerdictCounts {
+  const c: CWVerdictCounts = { yes: 0, no: 0, unsure: 0 };
+  for (const v of verdicts) c[v]++;
+  return c;
+}
+
+/** Pass score 0..100: yes = 1, unsure = 0.5, no = 0. */
+export function cwScore(c: CWVerdictCounts): number {
+  const total = c.yes + c.no + c.unsure;
+  if (!total) return 0;
+  return Math.round((100 * (c.yes + 0.5 * c.unsure)) / total);
+}
+
+/** A "no" is a hard breakdown; "unsure" is a soft one. */
+function isProblem(v: CWVerdict): boolean {
+  return v === "no" || v === "unsure";
+}
+
+export interface CWStepAgg {
+  task: CWTask;
+  step: CWStep;
+  /** 1-based index of the step within its task */
+  stepIndex: number;
+  evaluators: number;
+  byQuestion: { def: CWQuestionDef; counts: CWVerdictCounts; passRate: number }[];
+  /** overall pass rate across every question asked at this step (0..100) */
+  passRate: number;
+  /** evaluators who flagged at least one problem (no/unsure) here */
+  problemFlags: number;
+  problemRate: number; // 0..100
+  /** how strongly evaluators agree on the verdict (0..100) — reliability cue */
+  agreement: number;
+  avgSeverity: number | null;
+  maxSeverity: number | null;
+  failureStories: string[];
+  /** the dimension that fails most at this step, if any */
+  weakestDimension: CWDimension | null;
+}
+
+/** Per-step aggregation, flattened across tasks in author order. */
+export function cwStepStats(
+  config: CognitiveWalkthroughConfig,
+  results: CognitiveWalkthroughResult[]
+): CWStepAgg[] {
+  const qById = new Map(config.questions.map((q) => [q.id, q]));
+  const out: CWStepAgg[] = [];
+
+  for (const task of config.tasks) {
+    task.steps.forEach((step, si) => {
+      // collect this step's results across evaluators
+      const stepResults = results
+        .flatMap((r) => r.tasks)
+        .filter((t) => t.taskId === task.id)
+        .flatMap((t) => t.steps)
+        .filter((s) => s.stepId === step.id);
+
+      const evaluators = stepResults.length;
+      const byQuestion = config.questions.map((def) => {
+        const verdicts = stepResults
+          .map((s) => s.answers.find((a) => a.questionId === def.id)?.verdict)
+          .filter((v): v is CWVerdict => !!v);
+        const counts = cwTally(verdicts);
+        return { def, counts, passRate: cwScore(counts) };
+      });
+
+      const allVerdicts = stepResults.flatMap((s) =>
+        s.answers.filter((a) => qById.has(a.questionId)).map((a) => a.verdict)
+      );
+      const overall = cwTally(allVerdicts);
+
+      const problemFlags = stepResults.filter((s) =>
+        s.answers.some((a) => isProblem(a.verdict))
+      ).length;
+
+      // agreement: share of evaluators on the majority side (problem vs clean)
+      const clean = evaluators - problemFlags;
+      const agreement = evaluators
+        ? Math.round((100 * Math.max(problemFlags, clean)) / evaluators)
+        : 0;
+
+      const sevs = stepResults
+        .map((s) => s.severity)
+        .filter((s): s is number => s !== null && s > 0);
+
+      // weakest dimension = lowest pass rate among asked questions (if < 100)
+      let weakestDimension: CWDimension | null = null;
+      let worst = 101;
+      for (const q of byQuestion) {
+        if (q.counts.yes + q.counts.no + q.counts.unsure === 0) continue;
+        if (q.passRate < worst) {
+          worst = q.passRate;
+          weakestDimension = q.def.dimension;
+        }
+      }
+      if (worst >= 100) weakestDimension = null;
+
+      out.push({
+        task,
+        step,
+        stepIndex: si + 1,
+        evaluators,
+        byQuestion,
+        passRate: cwScore(overall),
+        problemFlags,
+        problemRate: evaluators
+          ? Math.round((100 * problemFlags) / evaluators)
+          : 0,
+        agreement,
+        avgSeverity: sevs.length ? mean(sevs) : null,
+        maxSeverity: sevs.length ? Math.max(...sevs) : null,
+        failureStories: stepResults
+          .map((s) => s.failureStory.trim())
+          .filter(Boolean),
+        weakestDimension,
+      });
+    });
+  }
+  return out;
+}
+
+export interface CWDimensionStat {
+  dimension: CWDimension;
+  counts: CWVerdictCounts;
+  passRate: number;
+  judgments: number;
+}
+
+/** Aggregate pass rate per cognitive dimension across all steps & evaluators. */
+export function cwDimensionStats(
+  config: CognitiveWalkthroughConfig,
+  results: CognitiveWalkthroughResult[]
+): CWDimensionStat[] {
+  const dims: CWDimension[] = ["goal", "visibility", "match", "feedback"];
+  const qDim = new Map(config.questions.map((q) => [q.id, q.dimension]));
+  const buckets = new Map<CWDimension, CWVerdict[]>(dims.map((d) => [d, []]));
+
+  for (const r of results)
+    for (const t of r.tasks)
+      for (const s of t.steps)
+        for (const a of s.answers) {
+          const d = qDim.get(a.questionId);
+          if (d) buckets.get(d)!.push(a.verdict);
+        }
+
+  return dims
+    .map((dimension) => {
+      const counts = cwTally(buckets.get(dimension)!);
+      return {
+        dimension,
+        counts,
+        passRate: cwScore(counts),
+        judgments: counts.yes + counts.no + counts.unsure,
+      };
+    })
+    .filter((d) => d.judgments > 0 || config.questions.some((q) => q.dimension === d.dimension));
+}
+
+export interface CWTaskStat {
+  task: CWTask;
+  passRate: number;
+  totalSteps: number;
+  problemSteps: number; // steps where ≥1 evaluator flagged a problem
+  evaluators: number;
+}
+
+export function cwTaskStats(
+  config: CognitiveWalkthroughConfig,
+  results: CognitiveWalkthroughResult[]
+): CWTaskStat[] {
+  const stepStats = cwStepStats(config, results);
+  return config.tasks.map((task) => {
+    const steps = stepStats.filter((s) => s.task.id === task.id);
+    const scored = steps.filter((s) => s.evaluators > 0);
+    return {
+      task,
+      passRate: scored.length ? Math.round(mean(scored.map((s) => s.passRate))) : 0,
+      totalSteps: task.steps.length,
+      problemSteps: steps.filter((s) => s.problemFlags > 0).length,
+      evaluators: Math.max(0, ...steps.map((s) => s.evaluators)),
+    };
+  });
+}
+
+/** Overall learnability: mean pass rate across every judgment collected. */
+export function cwOverallScore(
+  config: CognitiveWalkthroughConfig,
+  results: CognitiveWalkthroughResult[]
+): number {
+  const all: CWVerdict[] = [];
+  for (const r of results)
+    for (const t of r.tasks)
+      for (const s of t.steps) for (const a of s.answers) all.push(a.verdict);
+  return cwScore(cwTally(all));
 }
 
 // ============ Generic stats ============

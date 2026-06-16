@@ -9,11 +9,13 @@ import FirstClickResults from "@/components/results/FirstClickResults";
 import SurveyResults from "@/components/results/SurveyResults";
 import PrototypeResults from "@/components/results/PrototypeResults";
 import UsabilityResults from "@/components/results/UsabilityResults";
+import CognitiveWalkthroughResults from "@/components/results/CognitiveWalkthroughResults";
 import QuestionSummaries from "@/components/results/QuestionSummaries";
 import ParticipantsTable from "@/components/results/ParticipantsTable";
 import { getStudy, listResponses } from "@/lib/db";
 import {
   CardSortConfig,
+  CognitiveWalkthroughConfig,
   FirstClickConfig,
   PrototypeConfig,
   STUDY_TYPE_META,
@@ -27,11 +29,13 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function ResultsPage({ params }: { params: { id: string } }) {
-  const user = await currentUser();
+  const [user, study, responses] = await Promise.all([
+    currentUser(),
+    getStudy(params.id),
+    listResponses(params.id),
+  ]);
   if (!user) redirect("/login");
-  const study = await getStudy(params.id);
   if (!study || !canAccessStudy(user, study)) notFound();
-  const responses = await listResponses(params.id);
   const meta = STUDY_TYPE_META[study.type];
 
   return (
@@ -134,6 +138,13 @@ function TypedResults({
       return (
         <UsabilityResults
           config={study.config as UsabilityConfig}
+          responses={responses}
+        />
+      );
+    case "cognitive-walkthrough":
+      return (
+        <CognitiveWalkthroughResults
+          config={study.config as CognitiveWalkthroughConfig}
           responses={responses}
         />
       );

@@ -6,7 +6,8 @@ export type StudyType =
   | "first-click"
   | "survey"
   | "prototype"
-  | "usability";
+  | "usability"
+  | "cognitive-walkthrough";
 
 export type StudyStatus = "draft" | "live" | "closed";
 
@@ -35,7 +36,8 @@ export type StudyConfig =
   | FirstClickConfig
   | SurveyConfig
   | PrototypeConfig
-  | UsabilityConfig;
+  | UsabilityConfig
+  | CognitiveWalkthroughConfig;
 
 // ---------- Questions (shared by surveys / pre / post) ----------
 
@@ -264,6 +266,84 @@ export interface UsabilityResult {
   tasks: UsabilityTaskResult[];
 }
 
+// ---------- Cognitive walkthrough ----------
+
+/**
+ * The four cognitive dimensions of Wharton, Rieman, Lewis & Polson's (1994)
+ * cognitive walkthrough. At each step the evaluator answers one question per
+ * dimension; a "no" at any dimension is a learnability breakdown.
+ *  - goal      : Will the user try to achieve the right effect / sub-goal?
+ *  - visibility: Will the user notice the correct action is available?
+ *  - match     : Will the user link the correct action to the effect they want?
+ *  - feedback  : After acting, will the user see progress toward the goal?
+ */
+export type CWDimension = "goal" | "visibility" | "match" | "feedback";
+
+export interface CWQuestionDef {
+  id: string;
+  dimension: CWDimension;
+  text: string;
+}
+
+export interface CWStep {
+  id: string;
+  /** the single correct action a first-time user must take at this point */
+  action: string;
+  /** optional system response the evaluator should assume happened */
+  systemResponse?: string;
+  /** optional screenshot of the screen at this step (data-URL) */
+  screenshot?: string;
+}
+
+export interface CWTask {
+  id: string;
+  /** the goal the assumed user is trying to accomplish */
+  text: string;
+  /** optional starting context (where the user begins, what they know) */
+  startContext?: string;
+  /** the correct action sequence, in order */
+  steps: CWStep[];
+}
+
+export interface CognitiveWalkthroughConfig {
+  kind: "cognitive-walkthrough";
+  /** the assumed first-time user the evaluator should role-play */
+  persona: string;
+  /** the four CW questions asked at each step (text is editable) */
+  questions: CWQuestionDef[];
+  tasks: CWTask[];
+  /** ask a 0–4 severity rating whenever a step is flagged as a problem */
+  askSeverity: boolean;
+  /** ask for a written "failure story" whenever a step is flagged */
+  askFailureStory: boolean;
+}
+
+export type CWVerdict = "yes" | "no" | "unsure";
+
+export interface CWQuestionAnswer {
+  questionId: string;
+  verdict: CWVerdict;
+}
+
+export interface CWStepResult {
+  stepId: string;
+  answers: CWQuestionAnswer[];
+  /** 0 = no problem … 4 = catastrophic (Nielsen severity); null if not asked */
+  severity: number | null;
+  /** evaluator's explanation of why a user would fail here */
+  failureStory: string;
+  timeMs: number;
+}
+
+export interface CWTaskResult {
+  taskId: string;
+  steps: CWStepResult[];
+}
+
+export interface CognitiveWalkthroughResult {
+  tasks: CWTaskResult[];
+}
+
 // ---------- Responses ----------
 
 export type ResultData =
@@ -272,7 +352,8 @@ export type ResultData =
   | FirstClickResult
   | SurveyResult
   | PrototypeResult
-  | UsabilityResult;
+  | UsabilityResult
+  | CognitiveWalkthroughResult;
 
 export interface StudyResponse {
   id: string;
@@ -319,5 +400,10 @@ export const STUDY_TYPE_META: Record<
     label: "Usability Testing",
     tagline: "Task-based testing of a live site or app",
     emoji: "🧪",
+  },
+  "cognitive-walkthrough": {
+    label: "Cognitive Walkthrough",
+    tagline: "Inspect step-by-step learnability for first-time users",
+    emoji: "🧭",
   },
 };

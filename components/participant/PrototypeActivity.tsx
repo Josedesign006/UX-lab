@@ -87,6 +87,7 @@ function PrototypeTaskRunner({
   const start = useRef(Date.now());
 
   const screen = config.screens.find((s) => s.id === screenId);
+  const isLastTask = taskNumber >= taskCount;
 
   const finish = (outcome: "success" | "gave-up") =>
     onDone({
@@ -140,19 +141,31 @@ function PrototypeTaskRunner({
   return (
     <div className="min-h-screen bg-ink/5">
       <header className="bg-white border-b border-ink/10 px-6 py-3 sticky top-0 z-30">
-        <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm text-ink/75">
+        <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-ink/75 min-w-0">
             <span className="font-semibold text-accent">
-              Task {taskNumber}/{taskCount}:
+              Task {taskNumber} of {taskCount}:
             </span>{" "}
             {taskText}
           </p>
-          <button
-            className="text-sm text-ink/40 hover:text-ink/60"
-            onClick={() => finish("gave-up")}
-          >
-            I give up / skip
-          </button>
+          <div className="flex items-center gap-4 shrink-0">
+            <button
+              className="text-sm text-ink/40 hover:text-ink/60"
+              onClick={() => finish("gave-up")}
+              disabled={success}
+            >
+              I give up / skip
+            </button>
+            <button
+              className="btn-primary !py-2 !px-4 text-sm"
+              onClick={() => finish("success")}
+              disabled={success}
+            >
+              {isLastTask
+                ? "Finish & submit"
+                : `Finish task → Task ${taskNumber + 1} of ${taskCount}`}
+            </button>
+          </div>
         </div>
       </header>
       <div className="max-w-4xl mx-auto p-6">

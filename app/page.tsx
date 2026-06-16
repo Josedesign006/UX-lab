@@ -1,50 +1,98 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import Shell from "@/components/Shell";
-import { IconArrowRight, IconFlask, TypeTile } from "@/components/icons";
+import {
+  IconChart,
+  IconClock,
+  IconFlask,
+  IconPlay,
+  IconSparkle,
+  IconUsers,
+} from "@/components/icons";
 import { currentUser } from "@/lib/auth";
-import { countResponses, listStudies } from "@/lib/db";
-import { STUDY_TYPE_META } from "@/lib/types";
+import { listStudySummaries, responseStats } from "@/lib/db";
+import { fmtMs } from "@/lib/analysis";
+import { StudyType } from "@/lib/types";
+import StudyBoard, { DashStudy } from "./StudyBoard";
 
 export const dynamic = "force-dynamic";
 
-const STATUS_STYLES: Record<string, string> = {
-  draft: "bg-ink/5 text-ink/60",
-  live: "bg-lime text-ink",
-  closed: "bg-amber-100 text-amber-800",
+// Recommended sample sizes per method — drives the per-study progress bars.
+const SAMPLE_TARGET: Record<StudyType, number> = {
+  "card-sort": 30,
+  "tree-test": 50,
+  "first-click": 50,
+  survey: 50,
+  prototype: 20,
+  usability: 15,
+  "cognitive-walkthrough": 5,
 };
 
 export default async function Dashboard() {
   const user = await currentUser();
   if (!user) redirect("/login");
-  const studies = await listStudies(user.id);
-  const counts = await countResponses();
-  const totalResponses = studies.reduce((a, s) => a + (counts[s.id] ?? 0), 0);
+
+  const [summaries, stats] = await Promise.all([
+    listStudySummaries(user.id),
+    responseStats(),
+  ]);
+
+  const studies: DashStudy[] = summaries.map((s) => {
+    const st = stats[s.id];
+    return {
+      id: s.id,
+      type: s.type,
+      name: s.name,
+      status: s.status,
+      updatedAt: s.updatedAt,
+      responses: st?.count ?? 0,
+      week: st?.week ?? 0,
+      lastAt: st?.lastAt ?? null,
+      avgMs: st?.avgMs ?? null,
+      target: SAMPLE_TARGET[s.type],
+    };
+  });
+
   const live = studies.filter((s) => s.status === "live").length;
+  const drafts = studies.filter((s) => s.status === "draft").length;
+  const totalResponses = studies.reduce((a, s) => a + s.responses, 0);
+  const weekResponses = studies.reduce((a, s) => a + s.week, 0);
+
+  // Weighted mean completion time across every response we have a duration for.
+  const durTotal = studies.reduce(
+    (a, s) => (s.avgMs != null ? a + s.avgMs * s.responses : a),
+    0
+  );
+  const durCount = studies.reduce(
+    (a, s) => (s.avgMs != null ? a + s.responses : a),
+    0
+  );
+  const avgTime = durCount ? fmtMs(Math.round(durTotal / durCount)) : "—";
+
+  const stats6: {
+    icon: React.ReactNode;
+    value: string;
+    label: string;
+    sub?: string;
+    accent?: boolean;
+  }[] = [
+    { icon: <IconFlask className="w-4 h-4" />, value: String(studies.length), label: "studies" },
+    { icon: <IconPlay className="w-4 h-4" />, value: String(live), label: "live now", accent: live > 0 },
+    { icon: <IconSparkle className="w-4 h-4" />, value: String(drafts), label: "drafts", sub: drafts ? "awaiting launch" : undefined },
+    { icon: <IconUsers className="w-4 h-4" />, value: String(totalResponses), label: "responses" },
+    { icon: <IconChart className="w-4 h-4" />, value: `+${weekResponses}`, label: "this week", accent: weekResponses > 0 },
+    { icon: <IconClock className="w-4 h-4" />, value: avgTime, label: "avg. completion" },
+  ];
 
   return (
     <Shell>
-      <div className="mb-12">
+      <div className="mb-10">
         <p className="eyebrow mb-3">Research dashboard</p>
         <h1 className="h-display text-4xl sm:text-5xl leading-[1.05] max-w-2xl">
           Understand how people{" "}
           <span className="bg-lime px-1.5 rounded-md">think</span>, not just
           what they say.
         </h1>
-        <div className="inline-flex mt-9 card divide-x divide-ink/10 overflow-hidden">
-          {[
-            [String(studies.length), "studies"],
-            [String(live), "live now"],
-            [String(totalResponses), "responses"],
-          ].map(([v, l]) => (
-            <div key={l} className="px-7 py-4">
-              <p className="font-mono text-2xl font-semibold text-ink tabular-nums">
-                {v}
-              </p>
-              <p className="eyebrow mt-0.5">{l}</p>
-            </div>
-          ))}
-        </div>
       </div>
 
       {studies.length === 0 ? (
@@ -62,39 +110,31 @@ export default async function Dashboard() {
           </Link>
         </div>
       ) : (
-        <div className="card divide-y divide-ink/5 overflow-hidden">
-          {studies.map((s) => {
-            const meta = STUDY_TYPE_META[s.type];
-            return (
-              <Link
-                key={s.id}
-                href={`/studies/${s.id}`}
-                className="group flex items-center gap-5 px-6 py-5 hover:bg-paper/60 transition-colors"
-              >
-                <TypeTile type={s.type} />
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-ink tracking-tight truncate text-lg">
-                    {s.name}
-                  </p>
-                  <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink/40 mt-0.5">
-                    {meta.label} · updated{" "}
-                    {new Date(s.updatedAt).toLocaleDateString()}
-                  </p>
-                </div>
-                <span className="font-mono text-sm text-ink/60 tabular-nums">
-                  {counts[s.id] ?? 0}{" "}
-                  <span className="text-ink/35">responses</span>
-                </span>
+        <>
+          {/* KPI strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-9">
+            {stats6.map((k) => (
+              <div key={k.label} className="card px-5 py-4">
                 <span
-                  className={`font-mono text-[10px] font-semibold px-3 py-1.5 rounded-full uppercase tracking-[0.12em] ${STATUS_STYLES[s.status]}`}
+                  className={`w-8 h-8 rounded-lg grid place-items-center mb-3 ${
+                    k.accent ? "bg-lime text-ink" : "bg-ink/5 text-ink/60"
+                  }`}
                 >
-                  {s.status}
+                  {k.icon}
                 </span>
-                <IconArrowRight className="w-4 h-4 text-ink/25 group-hover:text-ink group-hover:translate-x-1 transition-all" />
-              </Link>
-            );
-          })}
-        </div>
+                <p className="font-mono text-2xl font-semibold text-ink tabular-nums leading-none">
+                  {k.value}
+                </p>
+                <p className="eyebrow mt-1.5">{k.label}</p>
+                {k.sub && (
+                  <p className="text-[10px] text-ink/35 mt-0.5">{k.sub}</p>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <StudyBoard studies={studies} />
+        </>
       )}
     </Shell>
   );
